@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="results/blackjack_banner.jpg" width="720" />
+</p>
+
 # Blackjack policy by Monte Carlo with exploring starts
 
 Five million hands of self-play produce a policy worth -0.0368 per hand to the player, across the 280
