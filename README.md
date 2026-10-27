@@ -1,94 +1,62 @@
-<p align="center">
-  <img src="results/blackjack_banner.jpg" width="720" />
-</p>
+# Blackjack policy by Monte Carlo with exploring starts
 
-## Project rationale
+Five million hands of self-play produce a policy worth -0.0368 per hand to the player, across the 280
+states the game has once the cards on the table are reduced to what matters: the player's total,
+whether an ace is still counted as eleven, and the dealer's face-up card. That loss rate is what a
+player should expect when the only two choices are hit and stand.
 
-The code plays 5 million hands of blackjack, starting from every possible situation. After each hand it updates its estimate of how good each decision was. Over millions of episodes, it learns when to hit, stand, or double down for every combination of player hand, dealer upcard, and ace status. The result is a color-coded policy map covering all 360 states, which can be checked against published basic strategy tables derived from exact probability calculations.
+The number is worse than the half a per cent a casino usually quotes, and the reason is the rule set
+rather than the method. Doubling down and splitting pairs are not in this game. Those are the two
+moves that let a player press an advantage when the dealer is weak, and without them the house keeps
+most of its edge.
 
-# Monte Carlo Reinforcement Learning for Optimal Blackjack Strategy
-
-A from-scratch implementation of **Monte Carlo Exploring Starts** (Sutton & Barto 2018, Section 5.3) applied to casino Blackjack. The agent learns an optimal policy over 5 million episodes by iteratively updating action-value estimates $Q(s,a)$ through first-visit returns, converging to the optimal hit/stand/double policy for the full 360-state space.
-
-## What the project finds
-
-After 5 million training episodes, the agent discovers the optimal hit/stand/double policy for all 360 player states. The learned strategy closely matches published basic strategy charts derived from exact probability calculations.
-
-<p align="center">
-  <img src="results/policy_map.png" width="700" />
-</p>
-
-Key results:
-- **Hard hands**: the agent learns to stand on 17+ regardless of dealer upcard, hit on 12-16 against dealer 7+, and stand on 12-16 against dealer 2-6
-- **Soft hands**: the agent learns to hit soft 17 and below, stand on soft 19+, and double on favorable soft totals against weak dealer upcards
-- **Doubling**: the agent identifies doubling opportunities on hard 10-11 against most dealer upcards, and selectively on soft hands
-
-Estimated game value under the learned policy: **-0.037** (a 3.7% house edge). This is consistent with the simplified ruleset: naturals pay 1:1 instead of 3:2, no splitting, no insurance, no surrender. Under standard 3:2 rules with splitting, the house edge is closer to 0.5%.
-
-## MDP formulation
-
-The environment is a finite Markov Decision Process $(S, A, P, R, \gamma)$:
-
-**State space** $S$: Each state is a tuple $(p, d, u)$ where $p \in \{4, 5, \ldots, 21\}$ is the player's hand total, $d \in \{1, 2, \ldots, 10\}$ is the dealer's visible card, and $u \in \{0, 1\}$ indicates whether the player holds a usable ace. This gives $|S| = 18 \times 10 \times 2 = 360$ states.
-
-**Action space** $A = \{\text{Hit}, \text{Stand}, \text{Double}\}$: Three actions at each decision point. Doubling draws exactly one card and doubles the wager.
-
-**Reward function** $R$:
-
-$$R(s, a, s') = \begin{cases} +1 & \text{player wins} \ -1 & \text{dealer wins} \ 0 & \text{draw or non-terminal} \end{cases}$$
-
-For double-down actions, the terminal reward is scaled by 2.
-
-**Transition dynamics** $P(s' | s, a)$: Determined by the infinite-deck card distribution. Each drawn card is sampled uniformly from $\{1,2,\ldots,10,10,10,10\}$. Dealer follows a fixed policy: hit until reaching 17+, stand on soft 17.
-
-**Discount factor**: $\gamma = 1$ (episodic, undiscounted).
-
-**Value update** (first-visit Monte Carlo):
-
-$$Q(s, a) \leftarrow Q(s, a) + \frac{1}{N(s,a)} \left[ G - Q(s, a) \right]$$
-
-where $G$ is the episode return and $N(s,a)$ is the visit count.
+![Learned policy: hit or stand for every player total against every dealer card, with and without a
+usable ace](results/policy_map.png)
 
 ## How it works
 
-**1. Environment simulator (`blackjack_env.py`)**
-Models Blackjack as a Markov Decision Process with state (player_sum, dealer_showing, usable_ace). Uses an infinite deck (cards drawn with replacement), dealer stands on soft 17, and three player actions: hit, stand, double. Naturals (two-card 21) are resolved immediately for both player and dealer.
+**The method.** Monte Carlo control with exploring starts. Play a hand to the end, note what it
+returned, then update the estimated value of every state-action pair that occurred along the way
+toward that return. The policy becomes greedy with respect to those estimates. No model of the deck
+is used anywhere; everything is learned from hands played.
 
-**2. Monte Carlo RL agent (`mc_agent.py`)**
-Implements Monte Carlo Exploring Starts. Each episode begins with a uniformly random first action to guarantee exploration of all state-action pairs. After the first step, the agent follows its current greedy policy. At the end of each episode, it computes the return G and performs an incremental mean update to Q(s,a) for every first-visited state-action pair. The greedy policy is then updated: pi(s) = argmax_a Q(s,a).
+The exploring starts part matters. Each hand begins from a randomly chosen state and a randomly
+chosen first action, so every state-action pair keeps getting sampled even after the policy has
+stopped choosing it. Without that, the estimates for actions the policy has abandoned go stale, and
+the policy can settle on something that merely looks good because the alternative was never tried
+again.
 
-**3. Policy visualization (`solve.py`)**
-Trains the agent for 5M episodes, then extracts the learned policy as two 18x10 matrices (hard hands and soft hands). Generates a dust-style converged policy map showing the action distribution across all 360 states.
+**Why Monte Carlo and not temporal difference.** A hand of blackjack ends quickly and the reward
+arrives only at the end. There is no bootstrapping to gain from, because the value of an intermediate
+state is nothing more than the average outcome of the hands that pass through it. Waiting for the
+real return avoids the bias that comes from updating one estimate toward another estimate.
 
-## Project structure
+**The state.** Player total from 12 to 21, dealer card from ace to ten, and a flag for whether the
+player holds an ace that can still count as eleven without busting. Totals under 12 need no decision,
+since hitting cannot bust. That gives the 280 states reported above.
 
-```
-rl-blackjack-solver/
-    blackjack_env.py      # Blackjack MDP: states, transitions, rewards
-    mc_agent.py           # Monte Carlo ES agent with Q-table
-    solve.py              # training loop, plot generation
-    requirements.txt      # numpy, matplotlib, seaborn
-    results/
-        policy_map.png         # dust-style converged policy map
-        blackjack_banner.jpg   # header image
-```
-
-## Running
+## Running it
 
 ```bash
 pip install -r requirements.txt
 python solve.py
 ```
 
-Training takes a few minutes for 5M episodes. Results are saved to `results/`.
+Five million episodes take a few minutes and write the policy map to `results/`.
+
+## Limits
+
+- Hit and stand only. No doubling, no splitting, no surrender, no insurance.
+- The deck is drawn with replacement, so cards are independent from hand to hand. That removes card
+  counting entirely, which is the one thing that moves blackjack from a losing game to a winnable one.
+- Dealer behaviour is fixed, standing on all 17s.
+- The policy is the output. Nothing here plays against a real casino rule set.
 
 ## References
 
-1. Sutton, R. S. & Barto, A. G. (2018). *Reinforcement Learning: An Introduction* (2nd ed.). MIT Press. Chapter 5: Monte Carlo Methods.
-
-2. Thorp, E. O. (1962). *Beat the Dealer: A Winning Strategy for the Game of Twenty-One*. Random House.
-
-3. Kaelbling, L. P., Littman, M. L., & Moore, A. W. (1996). "Reinforcement Learning: A Survey." *Journal of Artificial Intelligence Research*, 4, 237-285.
+1. Sutton, R. S. & Barto, A. G. (2018). *Reinforcement Learning: An Introduction*, 2nd edition. MIT
+   Press. Blackjack is the worked example for Monte Carlo control with exploring starts.
+2. Thorp, E. O. (1966). *Beat the Dealer*. Random House.
 
 ## License
 
